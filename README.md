@@ -21,7 +21,7 @@ A **captive portal** is a web page that users on a public network must interact 
 ## **Installation**
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-repository/captive-portal.git
+   git clone https://github.com/Adwaith-NP/captive-portal.git
    cd captive-portal
 
 2. Make the installation script executable:
