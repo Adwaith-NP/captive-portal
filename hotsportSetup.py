@@ -6,8 +6,12 @@ import sys
 import threading
 
 port = ""
+DhcpPort = ""
 stoping = False
 stopingHotsport = False
+
+redText = "\033[31m{}. \003"
+EndText = "\033[37mPress Ctrl+C to exit. \003"
 
 def list_interface():
     # Run the full command in a shell, since we're using pipes and multiple commands
@@ -25,52 +29,66 @@ def handle_exit_signal(signal, frame):
     global stoping
     global server_thread
     global stopingHotsport
-    print("\nProcess is ending. Cleaning up...")
-    stoping = True
-    server_thread.join()
-    stopHotsport()
+    print("\n\033[32mProcess is ending. Cleaning up...\033")
     stopingHotsport = True
-    startHotsport_thread.join()
+    stoping = True
+    if server_thread and server_thread.is_alive():
+        server_thread.join()
+    stopHotsport()
+    if startHotsport_thread and startHotsport_thread.is_alive():
+        startHotsport_thread.join()
     downCreatedIpTable(port)
+    downCreatedIpTable(DhcpPort)
+    print("\033[32mProcess execution complited successfully\033")
     sys.exit(0)
 
 def setUpIP(wifi):
     command = ["sudo","ifconfig",wifi,"192.168.28.1/24"]
-    result = subprocess.run(command,stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = subprocess.run(command,text=True)
     if not result.stdout:
-        print("IP setup for {}".format(wifi))
+        print(("IP setup for {}".format(wifi)))
     else:
-        print("IP setup not done error : \n{}".format(result.stdout))
+        print(redText.format("IP setup not done error : \n{}".format(result.stdout)))
+        print(EndText)
 
-def setUpIptables(wifi):
+def setUpIptables(wifi,hdcpPort):
+    global DhcpPort
+    DhcpPort = hdcpPort
     command = ["sudo", "iptables", "-t", "nat", "-A", "PREROUTING",
     "-i", wifi, "-p", "tcp", "--dport", "80",
     "-j", "DNAT", "--to-destination", f"192.168.28.1:{port}"]
+    command_DhcpPortForwardeing1=f"sudo iptables -t nat -A PREROUTING -p tcp --dport 53 -j REDIRECT --to-port {hdcpPort}"
+    command_DhcpPortForwardeing2=f"sudo iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-port {hdcpPort}"
     try:
         subprocess.run(command,stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(command_DhcpPortForwardeing1,shell=True)
+        subprocess.run(command_DhcpPortForwardeing2,shell=True)
     except subprocess.CalledProcessError as e:
-        print("An error ocuarde : \n",e)
+        print(redText.format("An error occurred : \n",e))
+        print(EndText)
 
 def indexOfIpTable(result,port):
-    key = "192.168.28.1:"+port
-    targetNumber = None
+    key = port
+    targetNumber = []
     for line in enumerate(result.stdout.splitlines()):
         if line[1].find(key)!=-1:
-            targetNumber = (re.search(r'\d+',line[1])).group()
+            targetNumber.append((re.search(r'\d+',line[1])).group())
     return targetNumber
 
 def downCreatedIpTable(port):
     command = ["sudo","iptables","-t","nat","-L","--line-numbers"]
     result = subprocess.run(command,capture_output=True, text=True)
-    targetNumber = indexOfIpTable(result,port)
-    if targetNumber:
-        command = ["sudo","iptables","-t","nat","-D","PREROUTING",targetNumber]
-        subprocess.run(command,stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    targetNumber = indexOfIpTable(result,port)
-    if not targetNumber:
-        print("Some error happend")
-    else:
-        print("Process complited")    
+    targetNumbers = indexOfIpTable(result,port)
+    if targetNumbers:
+        count = 0
+        for targetNumber in targetNumbers:
+            targetNumber = str(int(targetNumber)-count)
+            command = ["sudo","iptables","-t","nat","-D","PREROUTING",targetNumber]
+            subprocess.run(command,stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            count += 1
+    targetNumbers = indexOfIpTable(result,port)
+    if not targetNumbers:
+        print("Some error happend") 
 
 def stopHotsport():
     hostapdStopCommand = ["sudo","pkill","hostapd"]
@@ -90,23 +108,33 @@ def stopHotsport():
 def startHotsport():
     hostapdStartCommand = ["sudo","hostapd","hostapd.conf"]
     dnsmasqStartCommand = ["sudo","dnsmasq","-C","dhcpConfig.conf"]
-    subprocess.run(dnsmasqStartCommand,stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    process = subprocess.Popen(hostapdStartCommand, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    dns = subprocess.run(dnsmasqStartCommand,text=True)
+    if dns.stdout:
+        print(redText.format("An Error occurred in dns server"))
+        print(EndText)
     try:
-        count = 0
+        process = subprocess.Popen(hostapdStartCommand, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # count = 0
         while not stopingHotsport:
-            line = process.stdout.readline()
+            time.sleep(1)
+            line = process.stdout.readlines()
+            if process.poll() is not None and not stopingHotsport:
+                print(redText.format("An error occurred when creating hotsport"))
+                print(EndText)
+                break
             if line and line.strip() == "handle_probe_req: send failed":
-                count+=1
-            if count > 5:
-                print("process restarting")
-                process.terminate()
-                process = subprocess.Popen(hostapdStartCommand, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                time.sleep(1)
-                count = 0
-        print("Hotsport ended")
+                print("restart agaun")
+                print(redText.format("An error occurred when creating hotsport"))
+                print(EndText)
+                break
+            # if count > 5:
+            #     print("process restarting")
+            #     process.terminate()
+            #     process = subprocess.Popen(hostapdStartCommand, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            #     time.sleep(1)
+            #     count = 0
     except:
-        print("An error")
+        print("")
 
 def startServer(portValue):
     global port
@@ -117,7 +145,6 @@ def startServer(portValue):
     while not stoping:
         continue
     process.terminate()
-    print("Server stoped")
 
 def editConfigFile(new_value,filepath,key):
     with open(filepath, "r") as file:
@@ -132,26 +159,27 @@ def editConfigFile(new_value,filepath,key):
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, handle_exit_signal)
+    defaultWifiName = "WifiUpdate"
+    defaultSerevrPort = "9090"
+    defaultdnsPort = "9292"
     wifi = list_interface()
     editConfigFile(wifi,'dhcpConfig.conf',"interface=")
     editConfigFile(wifi,'hostapd.conf',"interface=")
-    userDifinedPort = input("give a port number : ")
-    wifiName = input("Give a name for wifi : ")
-    print(userDifinedPort,wifiName)
-    if userDifinedPort == "" or wifiName == "":
-        print("Try Again")
-        exit(0)
+    userDifinedPort = input(f"give a port number for server default({defaultSerevrPort}): ") or defaultSerevrPort
+    userDifinedDnspPort = input(f"give a port number for dns default({defaultdnsPort}): ") or defaultdnsPort
+    wifiName = input(f"Give a name for wifi default({defaultWifiName}): ") or defaultWifiName
+    print("Using wifi interface",wifi)
     editConfigFile(wifiName,'hostapd.conf',"ssid=")
+    editConfigFile(userDifinedDnspPort,'dhcpConfig.conf',"port=")
     server_thread = threading.Thread(target=startServer,args=(userDifinedPort,))
     server_thread.start()
 
     setUpIP(wifi)
-    setUpIptables(wifi)
+    setUpIptables(wifi,userDifinedDnspPort)
 
     startHotsport_thread = threading.Thread(target=startHotsport)
     startHotsport_thread.start()
     
-
     print("Press Ctrl+C to exit.")
     while True:
         pass
