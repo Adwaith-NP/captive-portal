@@ -15,6 +15,7 @@ A **captive portal** is a web page that users on a public network must interact 
 - A Wi-Fi module that:
   - Supports the `nl80211` driver.
   - Can operate in **master mode** (Access Point mode).
+  - Python with flask (pip install flask)
 
 ---
 
