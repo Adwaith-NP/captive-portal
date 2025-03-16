@@ -44,9 +44,6 @@ A **captive portal** is a web page that users on a public network must interact 
 # Troubleshooting
 
 - Ensure your Wi-Fi module is compatible with nl80211 and can operate in master mode.
-- Use the command below to check Wi-Fi driver compatibility:
-  ```bash
-  iw list | grep -A 10 "Supported interface modes"
 - If you encounter issues, verify that the dependencies (hostapd, dnsmasq, etc.) are properly installed using:
   ```bash
   which <command>
